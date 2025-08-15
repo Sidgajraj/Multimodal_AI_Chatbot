@@ -133,7 +133,7 @@ def _next_missing_field(session: dict) -> str:
 def _conversational_prompt(user_input: str, session_snapshot: dict, next_missing: str) -> str:
     known = json.dumps(session_snapshot, ensure_ascii=False)
     return f"""
-You are Jed.ai, a warm, concise legal intake assistant.
+You are a warm, concise legal intake assistant.
 Remember what the user has already provided. Do NOT ask for the same info again.
 
 KNOWN INFO (what we already have — do NOT re-ask these):
@@ -143,7 +143,7 @@ RULES:
 - Keep it human and empathetic.
 - Ask at most ONE follow-up, and ONLY for the NEXT missing field: {next_missing if next_missing else "none (we have all we need)"}.
 - If user asks a legal question, answer briefly (not legal advice) then, if natural, ask for the next missing field.
-- If user asks to talk to a human, say: You can reach our intake team at **docs@calljacob.com** or **(213) 748-7734**. I'm here if you'd like to continue now.
+- If user asks to talk to a human, say: You can reach our intake team at **sidgajraj@gmail.com** or **(xxx) xxx-xxxx**. I'm here if you'd like to continue now.
 - Include a compact JSON block ONLY if (a) we have enough detail for multiple fields OR (b) all fields are filled. Otherwise, no JSON.
 - Never ask for an item that's already present in KNOWN INFO.
 
@@ -245,3 +245,4 @@ def handle_case_storage(gpt_output):
     except Exception as e:
         print("Error while saving case info:", e)
         return False
+
