@@ -1,227 +1,312 @@
 import streamlit as st
-from multimodal_engine import extract_case_info_prompt_only, handle_case_storage
+st.set_page_config(page_title="Legal Assistant")
+
 import base64
 import json
-import random
+import os
+import uuid
+import tempfile
+from datetime import datetime
+import io
+
+from dotenv import load_dotenv
+from openai import OpenAI
 
 
-def strip_json_from_reply(reply):
-    try:
-        json_start = reply.find("{")
-        json_end = reply.rfind("}") + 1
-        if json_start != -1 and json_end != -1:
-            return reply[json_end:].strip()
-    except:
-        pass
-    return reply.strip()
+AUDIO_RECORDER_AVAILABLE = True
 
 
-st.set_page_config(page_title="Jed.ai Legal Assistant")
+import chatbot_engine as engine
+
+load_dotenv()
+oclient = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
-
-st.title("Jed.ai Legal Assistant")
+st.title("Legal Assistant")
 st.markdown("Ask a legal question below or describe an incident.")
 
 
-if "chat_blocks" not in st.session_state:
-    st.session_state.chat_blocks = []
+if "history" not in st.session_state:
+    st.session_state.history = []
 
-if "case_data" not in st.session_state:
-    st.session_state.case_data = {
-        "Full Name": "",
-        "Contact": "",
-        "Case Type": "",
-        "Date of Incident": "",
-        "Description": ""
-    }
+if "temp_case_id" not in st.session_state:
+    date_str = datetime.now().strftime("%Y%m%d")
+    st.session_state.temp_case_id = f"temp_{date_str}_{uuid.uuid4().hex[:6]}"
 
-if "field_queue" not in st.session_state:
-    st.session_state.field_queue = []
-
-if "awaiting_field" not in st.session_state:
-    st.session_state.awaiting_field = None
-
-def get_conversational_prompt(field):
-    prompts = {
-        "Full Name": [
-            "I really appreciate you sharing that. Mind letting me know your name?",
-            "Thanks for telling me that. What’s your full name so I can make a proper note?",
-            "Got it — what's your name, just so I can make sure we keep things organized?"
-        ],
-        "Contact": [
-            "Could I get a phone number or email to follow up if needed?",
-            "How can we reach you later if we need to follow up?",
-            "Appreciate that. May I get your contact number or email?"
-        ],
-        "Date of Incident": [
-            "When did this happen, if you remember?",
-            "Can you share when the incident occurred?",
-            "Just so we get the timeline right — when was this?"
-        ],
-        "Description": [
-            "Would you be open to sharing a quick summary of what happened?",
-            "Can you briefly describe what happened?",
-            "If you're okay with it, a short description would help us understand better."
-        ],
-        "Case Type": [
-            "What type of incident was it? (Car accident, slip and fall, etc.)",
-            "Just to clarify, what kind of case is this?",
-            "Can you tell me what type of situation this was?"
-        ]
-    }
-    return random.choice(prompts.get(field, ["Could you tell me more?"]))
+if "processed_audio_ids" not in st.session_state:
+    st.session_state.processed_audio_ids = set()
 
 
-def handle_submit():
-    user_input = st.session_state.user_input.strip()
+def strip_json_from_reply(reply: str) -> str:
+    """Remove JSON from reply, but ensure we don't return empty string"""
+    try:
+        
+        json_start = reply.find("{")
+        json_end = reply.rfind("}") + 1
+        
+        if json_start != -1 and json_end > json_start:
+           
+            before_json = reply[:json_start].strip()
+            after_json = reply[json_end:].strip()
+            
+           
+            if before_json and after_json:
+                clean_reply = f"{before_json} {after_json}".strip()
+            elif before_json:
+                clean_reply = before_json
+            elif after_json:
+                clean_reply = after_json
+            else:
+                clean_reply = ""
+            
+            
+            if clean_reply:
+                return clean_reply
+        
+       
+        original = reply.strip()
+        if original.startswith("{") and original.endswith("}"):
+           
+            return "I've recorded your case information. How else can I help you?"
+        
+        return original if original else "I've processed your request."
+        
+    except Exception:
+        return reply.strip() if reply.strip() else "I apologize, but I couldn't generate a proper response."
 
- 
-    if not user_input:
-        return
-
-    user_input = user_input.lower()
-
-    legal_keywords =  ["should", "can i", "do i have", "is it legal", "sue", "lawsuit", "claim", "liable", "why"]
-    if any(kw in user_input for kw in legal_keywords):
-        gpt_output = extract_case_info_prompt_only(user_input)
-        st.session_state.chat_blocks.append({
-            "user": user_input,
-            "assistant": gpt_output
-        })
-        st.session_state.awaiting_field = None
-        st.session_state.user_input = ""
-        return
-
- 
-    casual_inputs = [
-        "hi", "hello", "hey", "how are you", "good morning", "good evening",
-        "what's up", "sup", "yo", "how’s it going", "how r u"
-    ]
-    if user_input in casual_inputs:
-        gpt_output = extract_case_info_prompt_only(user_input)
-        st.session_state.chat_blocks.append({
-            "user": user_input,
-            "assistant": gpt_output
-        })
-        st.session_state.awaiting_field = None
-        st.session_state.user_input = ""
-        return
-
- 
-    if st.session_state.awaiting_field:
-        field = st.session_state.awaiting_field
-        st.session_state.case_data[field] = user_input
-        missing = [k for k, v in st.session_state.case_data.items() if not v]
-        st.session_state.field_queue = missing
-        st.session_state.awaiting_field = missing[0] if missing else None
-
-        follow_up = ""
-        if st.session_state.awaiting_field:
-            follow_up = get_conversational_prompt(st.session_state.awaiting_field)
-
-        st.session_state.chat_blocks.append({
-            "user": user_input,
-            "assistant": f"{field} recorded. Thank you!" + (f"\n\n{follow_up}" if follow_up else "")
-    })
-
-
-        if not missing:
-            json_ready = json.dumps(st.session_state.case_data)
-            handle_case_storage(json_ready)
-            st.session_state.chat_blocks.append({
-                "user": "",
-                "assistant": "Thank you for sharing your details. A member of our team will be in touch with you shortly to assist further."
-            })
-
-        st.session_state.user_input = ""
-        return
-
-
-    if user_input:
-        gpt_output = extract_case_info_prompt_only(user_input)
-        st.session_state.chat_blocks.append({
-            "user": user_input,
-            "assistant": gpt_output
-        })
-
-        try:
-            json_start = gpt_output.find("{")
-            json_end = gpt_output.rfind("}") + 1
-            if json_start != -1 and json_end != -1:
-                json_block = gpt_output[json_start:json_end]
-                data = json.loads(json_block)
-
-             
-                for key in st.session_state.case_data:
-                    if key in data and data[key].strip():
-                        st.session_state.case_data[key] = data[key].strip()
-
+def maybe_store_case(reply: str):
+    """If the assistant reply includes a JSON block, hand it to the engine to save."""
+    try:
+        s = reply
+        j0 = s.find("{")
+        j1 = s.rfind("}") + 1
+        if j0 != -1 and j1 != -1:
+            json_block = s[j0:j1]
+            print(f"DEBUG: Found JSON block: {json_block}")
+            
+           
+            try:
+                import json
+                from datetime import datetime, timedelta
                 
-                filled_fields = [key for key in data if key in st.session_state.case_data and data[key].strip()]
-                no_fields_updated = len(filled_fields) == 0
-
+                parsed = json.loads(json_block)
+                print(f"DEBUG: JSON is valid: {parsed}")
+                
+                
+                cleaned_data = {}
+                
+                
+                if "Case Type" in parsed:
+                    cleaned_data["Case Type"] = parsed["Case Type"]
+                
                
-                if not no_fields_updated:
-                    missing_fields = [key for key, val in st.session_state.case_data.items() if not val]
-                    st.session_state.field_queue = missing_fields
-                    st.session_state.awaiting_field = missing_fields[0] if missing_fields else None
-
-                    if not missing_fields:
-                        handle_case_storage(json_block)
-                        st.session_state.chat_blocks.append({
-                            "user": "",
-                            "assistant": "Our human agent will reach out to you shortly."
-                        })
+                if "Description" in parsed:
+                    cleaned_data["Description"] = parsed["Description"]
+                
+                
+                if "Date of Incident" in parsed:
+                    date_str = parsed["Date of Incident"].lower().strip()
+                    try:
+                        if date_str in ["yesterday"]:
+                            actual_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+                            cleaned_data["Date of Incident"] = actual_date
+                        elif date_str in ["today"]:
+                            actual_date = datetime.now().strftime("%Y-%m-%d")
+                            cleaned_data["Date of Incident"] = actual_date
+                        elif "ago" in date_str:
+                            
+                            if "couple" in date_str or "few" in date_str:
+                                actual_date = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
+                            else:
+                                
+                                actual_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+                            cleaned_data["Date of Incident"] = actual_date
+                        else:
+                            
+                            try:
+                                
+                                for fmt in ["%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%B %d, %Y"]:
+                                    try:
+                                        datetime.strptime(date_str, fmt)
+                                        cleaned_data["Date of Incident"] = date_str
+                                        break
+                                    except ValueError:
+                                        continue
+                                else:
+                                    
+                                    cleaned_data["Date of Incident"] = datetime.now().strftime("%Y-%m-%d")
+                            except:
+                                cleaned_data["Date of Incident"] = datetime.now().strftime("%Y-%m-%d")
+                    except Exception as e:
+                        print(f"DEBUG: Date parsing error: {e}")
+                        
+                        cleaned_data["Date of Incident"] = datetime.now().strftime("%Y-%m-%d")
+                
+                
+                required_fields = ["Full Name", "Phone Number", "Email"]
+                for field in required_fields:
+                    if field in parsed:
+                        cleaned_data[field] = parsed[field]
+                    else:
+                        
+                        cleaned_data[field] = ""
+                
+                
+                cleaned_json = json.dumps(cleaned_data)
+                print(f"DEBUG: Cleaned JSON: {cleaned_json}")
+                st.write(f"DEBUG: Saving cleaned data: {cleaned_json}")
+                
+                
+                result = engine.handle_case_storage(cleaned_json)
+                print(f"DEBUG: Storage result: {result}")
+                
+                if result:
+                    st.success("Case information saved successfully!")
                 else:
-                    st.session_state.awaiting_field = None
+                    st.warning("Case information could not be saved - check database connection")
+                    
+            except json.JSONDecodeError as e:
+                print(f"DEBUG: Invalid JSON format: {e}")
+                st.error(f"Invalid JSON format: {e}")
+                
+    except Exception as e:
+        print(f"DEBUG: Error in maybe_store_case: {e}")
+        st.error(f"Error saving case info: {e}")
 
-        except Exception as e:
-            print("GPT response had no valid JSON:", e)
+def transcribe_audio(audio_bytes):
+    """Transcribe audio using OpenAI Whisper - no temp files needed"""
+    try:
+        
+        audio_file = io.BytesIO(audio_bytes)
+        audio_file.name = "audio.wav"  
+        
+        
+        transcript = oclient.audio.transcriptions.create(
+            model="whisper-1",
+            file=audio_file
+        )
+        
+        return transcript.text.strip()
+        
+    except Exception as e:
+        st.error(f"Transcription error: {e}")
+        return ""
+
+def text_to_speech(text):
+    """Convert text to speech using OpenAI TTS"""
+    try:
+        
+        if not text or not text.strip():
+            text = "I apologize, but I couldn't generate a proper response."
+        
+        
+        if len(text) > 4000:
+            text = text[:4000] + "..."
+        
+        response = oclient.audio.speech.create(
+            model="tts-1",
+            voice="alloy",
+            input=text.strip(),
+            response_format="mp3"
+        )
+        return response.content
+    except Exception as e:
+        st.error(f"TTS error: {e}")
+        return None
+
+def process_user_input(user_input, is_voice=False):
+    st.session_state.history.append(("user", user_input))
+
+    with st.spinner("Thinking..."):
+        reply = engine.chat(user_input, session_id=st.session_state.temp_case_id)
+        print(f"DEBUG: Full bot reply: {repr(reply)}")
+        maybe_store_case(reply)
+
+        clean_reply = strip_json_from_reply(reply)
+        if not clean_reply.strip():
+            clean_reply = "I recieved your message and I'm processing it."
+
+        st.session_state.history.append(("assistant", clean_reply))
+
+        if is_voice:
+            with st.spinner("Generating voice response..."):
+                audio_response = text_to_speech(clean_reply)
+                if audio_response:
+                    st.audio(audio_response, format="audio/mp3", autoplay=True)
+    
+    
 
 
-        st.session_state.user_input = ""
+user_text = st.chat_input("Type your message here...")
+if user_text:
+    process_user_input(user_text, is_voice=False)
 
 
-st.text_input("Ask a question:", key="user_input", on_change=handle_submit)
+for role, message in st.session_state.history:
+    with st.chat_message(role):
+        if role == "assistant":
+            clean_message = strip_json_from_reply(message)
+            st.markdown(clean_message)
+        else:
+            st.write(message)
+
 st.markdown("---")
 
 
+st.subheader("Voice Input")
 
-for i, msg in reversed(list(enumerate(st.session_state.chat_blocks))):
-    with st.container():
-        st.markdown(f"**You said:** {msg['user']}")
-
-        with st.expander("Jed.ai Legal Assistant's Response", expanded=True):
-            assistant_reply = msg["assistant"].strip()
-
-           
-            if assistant_reply == "Case information received and stored.":
-                st.markdown("*Case information received and stored.*")
+if AUDIO_RECORDER_AVAILABLE:
+    st.markdown("**Record your voice message:**")
+    
+    
+    audio_bytes = st.audio_input("Record your question", label_visibility="collapsed")
+    
+    if audio_bytes is not None:
+        
+        audio_id = hash(audio_bytes.read())
+        audio_bytes.seek(0) 
+        
+        if audio_id not in st.session_state.processed_audio_ids:
+            st.session_state.processed_audio_ids.add(audio_id)
+            
+            st.audio(audio_bytes, format="audio/wav")
             
             
-            elif assistant_reply.endswith("recorded. Thank you!"):
-                st.markdown(assistant_reply)
-
-            
-            elif st.session_state.awaiting_field:
-                follow_up = get_conversational_prompt(st.session_state.awaiting_field)
-                st.markdown(follow_up)
-
+            with st.spinner("Processing your voice..."):
+                audio_data = audio_bytes.read()
+                transcript = transcribe_audio(audio_data)
                 
-                if assistant_reply.startswith("{"):
-                    json_end = assistant_reply.find("}") + 1
-                    gpt_tail = assistant_reply[json_end:].strip()
-                    if gpt_tail and not gpt_tail.startswith("{"):
-                        st.markdown(gpt_tail.replace("\n", "  \n"))
-                continue  
-
+                if transcript:
+                    st.success(f"Heard: '{transcript}'")
+                    process_user_input(transcript, is_voice=True)
+                else:
+                    st.error("Could not understand the audio. Please try again.")
+        else:
             
-            else:
-                clean_reply = strip_json_from_reply(assistant_reply)
-                if clean_reply:
-                    st.markdown(clean_reply.replace("\n", "  \n"))
+            st.audio(audio_bytes, format="audio/wav")
+            st.info("This audio has already been processed.")
 
-        st.markdown("---")
+else:
+    
+    st.error("Audio input not available in this Streamlit version")
+    
+    
+    st.markdown("**Alternative: Upload an audio file**")
+    uploaded_file = st.file_uploader("Choose an audio file", type=['wav', 'mp3', 'm4a'])
+    
+    if uploaded_file is not None:
+        st.audio(uploaded_file, format="audio/wav")
+        
+        if st.button("Transcribe & Send"):
+            with st.spinner("Processing uploaded audio..."):
+                audio_bytes = uploaded_file.read()
+                transcript = transcribe_audio(audio_bytes)
+                
+                if transcript:
+                    st.success(f"Transcribed: '{transcript}'")
+                    process_user_input(transcript, is_voice=True)
+                else:
+                    st.error("Could not transcribe the audio file.")
 
 
+st.caption("Powered by OpenAI Whisper (Speech-to-Text) and TTS (Text-to-Speech)")
