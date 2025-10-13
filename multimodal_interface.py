@@ -304,5 +304,3 @@ else:
                 else:
                     st.error("Could not transcribe the audio file.")
 
-
-st.caption("Powered by OpenAI Whisper (Speech-to-Text) and TTS (Text-to-Speech)")
