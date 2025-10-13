@@ -36,7 +36,7 @@ def _reset_session(session_id: str):
     }
 
 
-def save_case(name, contact, case_type, date, description):
+def save_case(name, contact, date, description):
     try:
         conn = psycopg2.connect(
             host="localhost",
@@ -46,9 +46,9 @@ def save_case(name, contact, case_type, date, description):
         )
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO intake_cases (name, contact, case_type, date_of_incident, description)
-            VALUES (%s, %s, %s, %s, %s)
-        """, (name, contact, case_type, date, description))
+            INSERT INTO intake_cases (name, contact, date_of_incident, description)
+            VALUES (%s, %s, %s, %s)
+        """, (name, contact, date, description))
         conn.commit()
         cur.close()
         conn.close()
@@ -83,10 +83,6 @@ def parse_incident_date(date_str):
 
 
 def _extract_delta(user_input: str) -> dict:
-    """
-    Extract ONLY what the user explicitly provided in this turn.
-    Return dict with possibly partial keys from the JSON schema.
-    """
     prompt = f"""
 Extract ONLY the fields explicitly present in the user's message.
 Return a JSON object with some of these keys if present, else omit the key:
@@ -99,7 +95,7 @@ Return a JSON object with some of these keys if present, else omit the key:
 }}
 
 User message:
-\"\"\"{user_input}\"\"\"
+\"\"\"{user_input}\"\"\""
 """
     try:
         r = client.chat.completions.create(
@@ -118,11 +114,9 @@ User message:
 def _merge_session(session: dict, delta: dict):
     for k, v in (delta or {}).items():
         if isinstance(v, str) and v.strip():
-           
             session[k] = v.strip()
 
 def _next_missing_field(session: dict) -> str:
-    
     order = ["Description", "Date of Incident", "Full Name", "Contact"]
     for k in order:
         if not session.get(k, "").strip():
@@ -148,32 +142,22 @@ RULES:
 - Never ask for an item that's already present in KNOWN INFO.
 
 User message:
-\"\"\"{user_input}\"\"\"
+\"\"\"{user_input}\"\"\""
 """.strip()
 
 
 def chat(user_text: str, session_id: str = None) -> str:
-    """
-    Conversational engine with per-session memory.
-    - Extracts new info from this turn
-    - Merges into session memory
-    - Prompts the model with KNOWN INFO and asks only for next missing field
-    """
     try:
         session = _get_session(session_id or "_default")
 
-        
         if any(kw in user_text.lower() for kw in ["start over", "restart", "reset", "new case"]):
             _reset_session(session_id or "_default")
 
-        
         delta = _extract_delta(user_text)
         _merge_session(session, delta)
 
-       
         nxt = _next_missing_field(session)
 
-        
         prompt = _conversational_prompt(user_text, session_snapshot=session, next_missing=nxt)
         resp = client.chat.completions.create(
             model="gpt-4-0613",
@@ -182,7 +166,6 @@ def chat(user_text: str, session_id: str = None) -> str:
         )
         reply = resp.choices[0].message.content.strip()
 
-       
         try:
             j0, j1 = reply.find("{"), reply.rfind("}") + 1
             if j0 >= 0 and j1 > j0:
@@ -191,19 +174,17 @@ def chat(user_text: str, session_id: str = None) -> str:
         except Exception:
             pass
 
-        
         if not _next_missing_field(session):
             parsed_date = parse_incident_date(session.get("Date of Incident", ""))
             if parsed_date:
+                # CHANGED: no case_type argument
                 ok = save_case(
                     name=session.get("Full Name", ""),
                     contact=session.get("Contact", ""),
-                    case_type=session.get("Case Type", ""),
                     date=parsed_date.strftime("%Y-%m-%d"),
                     description=session.get("Description", "")
                 )
                 if ok:
-                    
                     pass
 
         return reply
@@ -214,7 +195,6 @@ def chat(user_text: str, session_id: str = None) -> str:
 
 
 def extract_case_info_prompt_only(user_input):
-    
     return chat(user_input, session_id="_default")
 
 def handle_case_storage(gpt_output):
@@ -235,7 +215,6 @@ def handle_case_storage(gpt_output):
         ok = save_case(
             name=data.get("Full Name", ""),
             contact=data.get("Contact", ""),
-            case_type=data.get("Case Type", ""),
             date=parsed_date.strftime("%Y-%m-%d"),
             description=data.get("Description", "")
         )
@@ -245,4 +224,3 @@ def handle_case_storage(gpt_output):
     except Exception as e:
         print("Error while saving case info:", e)
         return False
-
