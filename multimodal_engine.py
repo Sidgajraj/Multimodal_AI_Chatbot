@@ -163,7 +163,7 @@ def chat(user_text: str, session_id: str = None) -> str:
             model="gpt-4-0613",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.2
-        )
+        ) 
         reply = resp.choices[0].message.content.strip()
 
         try:
@@ -177,7 +177,6 @@ def chat(user_text: str, session_id: str = None) -> str:
         if not _next_missing_field(session):
             parsed_date = parse_incident_date(session.get("Date of Incident", ""))
             if parsed_date:
-                # CHANGED: no case_type argument
                 ok = save_case(
                     name=session.get("Full Name", ""),
                     contact=session.get("Contact", ""),
