@@ -16,7 +16,7 @@ from openai import OpenAI
 AUDIO_RECORDER_AVAILABLE = True
 
 
-import chatbot_engine as engine
+import multimodal_engine as engine
 
 load_dotenv()
 oclient = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -38,7 +38,6 @@ if "processed_audio_ids" not in st.session_state:
 
 
 def strip_json_from_reply(reply: str) -> str:
-    """Remove JSON from reply, but ensure we don't return empty string"""
     try:
         
         json_start = reply.find("{")
@@ -75,7 +74,6 @@ def strip_json_from_reply(reply: str) -> str:
         return reply.strip() if reply.strip() else "I apologize, but I couldn't generate a proper response."
 
 def maybe_store_case(reply: str):
-    """If the assistant reply includes a JSON block, hand it to the engine to save."""
     try:
         s = reply
         j0 = s.find("{")
@@ -174,7 +172,6 @@ def maybe_store_case(reply: str):
         st.error(f"Error saving case info: {e}")
 
 def transcribe_audio(audio_bytes):
-    """Transcribe audio using OpenAI Whisper - no temp files needed"""
     try:
         
         audio_file = io.BytesIO(audio_bytes)
@@ -193,7 +190,6 @@ def transcribe_audio(audio_bytes):
         return ""
 
 def text_to_speech(text):
-    """Convert text to speech using OpenAI TTS"""
     try:
         
         if not text or not text.strip():
