@@ -2,7 +2,7 @@
 This project is a multimodal legal intake bot built with Streamlit and OpenAI. It handles both text and voice, extracts client information, and saves everything to Postgres. The goal is to make legal intake conversational, not robotic.
 
 What It Does
-It lets a user type or speak, and the assistant figures out what they’re saying — like who they are, what happened, when, and how to contact them. Whisper converts speech to text, GPT handles the reasoning and field extraction, and TTS gives the voice response. Every complete case gets saved to Postgres automatically.
+It lets a user type or speak, and the assistant figures out what they’re saying - like who they are, what happened, when, and how to contact them. Whisper converts speech to text, GPT handles the reasoning and field extraction, and TTS gives the voice response. Every complete case gets saved to Postgres automatically.
 
 How It’s Structured
 Multimodal_interface.py is the UI. It runs the Streamlit chat, handles text and audio input, and plays back the assistant’s TTS reply. It strips out JSON fields before showing messages, so the user only sees the clean conversation.
