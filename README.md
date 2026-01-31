@@ -11,7 +11,9 @@ Demo Video
 A short walkthrough showing real-time text and voice intake, natural follow-up questions, and automatic case storage.
 
 
+
 [https://youtu.be/kSthdrNsfvI?si=2-URNKoSMylq4qGL](https://github.com/user-attachments/assets/2d468422-18b9-4367-b4e2-8d199a37e0b6)
+
 
 
 How It’s Structured
